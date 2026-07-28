@@ -1,0 +1,213 @@
+---
+title: "Coloring in Cartographic Design"
+format: html
+editor: visual
+---
+
+### Welcome to today's lecture! 
+
+We will talk about several different coloring styles and techniques with our familiar Oahu Median Income dataset
+
+#### Read In Libraries
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(here)
+library(RColorBrewer)
+library(viridisLite)
+library(tidycensus)
+library(mapview)
+library(classInt)
+library(tmap)
+library(shiny)
+```
+
+#### Load in Data
+
+```{r}
+oahu_median_income <- get_acs(
+  geography = "tract",
+  variables = "B19013_001",  # median income
+  state = "HI",
+  county = "Honolulu",
+  year = 2023,
+  geometry = TRUE
+) |> 
+  dplyr::filter(GEOID != "15003981200")
+```
+
+#### Histogram of income distribution
+
+```{r}
+ggplot(data = oahu_median_income, aes(x = estimate)) +
+  geom_histogram(color = "black", fill = "steelblue") +
+  theme_bw()
+```
+
+#### Default Mapping
+
+```{r}
+mapview(oahu_median_income, zcol = "estimate")
+```
+
+#### Color Design
+
+Jenks natural breaks (also called the *Jenks optimization method*) is a classification algorithm that groups continuous data into classes by minimizing the variance *within* each class and maximizing the variance *between* classes. In plain terms: it looks for natural "gaps" or clusters in the data and draws the break points there, rather than dividing the range evenly
+
+```{r}
+brks_jenks <- classIntervals(oahu_median_income$estimate, n = 6, style = "jenks")$brks
+
+```
+
+```{r}
+brks_jenks
+```
+
+```{r}
+ggplot(data = oahu_median_income, aes(x = estimate)) +
+  geom_histogram(binwidth = 10000, fill = "steelblue", color = "white") +
+  geom_vline(xintercept = brks_jenks, color = "firebrick", linetype = "dashed", linewidth = 0.6) +
+  theme_minimal() +
+  labs(x = "Median Household Income", y = "Number of Tracts",
+       title = "Distribution of Median Household Income — Oahu Census Tracts",
+       subtitle = "Dashed lines: Jenks natural breaks (n = 6)")
+```
+
+```{r}
+mapview(oahu_median_income, zcol = "estimate", col.regions = viridis::viridis(6), at = brks_jenks)
+```
+
+We can do the same thing more simply with the `tmap` package
+
+```{r}
+tmap_mode("view")  # interactive, like mapview. Use "plot" for static.
+
+tm_shape(oahu_median_income) +
+  tm_polygons(
+    "estimate",
+    style = "jenks",      # <-- classification method lives right here
+    n = 6,                 # <-- number of classes
+    palette = "viridis",   # or "YlGnBu", "-viridis" to reverse, etc.
+    title = "Median Income"
+  )
+```
+
+There are many ways to segment continuous data for a color scale.
+
+#### Classification Styles (`style =`)
+
+| Style | What it does | Best used when |
+|----|----|----|
+| `pretty` | Rounds breaks to nice, readable numbers (e.g. 0, 50k, 100k) | Default choice for general audiences; readability over precision |
+| `equal` | Divides the data range into equal-width bins | Data is roughly uniform/normal, no major skew or outliers |
+| `quantile` | Divides data so each bin has an equal *count* of observations | You want every color used evenly; showing relative rank/percentile |
+| `jenks` | Finds natural gaps in the data (minimizes within-class variance) | Skewed, real-world data (income, population); general-purpose "best default" |
+| `fisher` | Similar goal to jenks (variance minimization), faster algorithm for large datasets | Same use case as jenks, but with large `n` (thousands of observations) |
+| `sd` | Bins centered on the mean, in increments of standard deviation | Data represents *deviation from a mean* (e.g. anomalies, diverging data) — not raw levels |
+| `kmeans` | Uses k-means clustering to find groups | Data has genuinely distinct clusters you want statistically identified |
+| `hclust` | Hierarchical clustering to find groups | Similar to kmeans; useful when cluster structure may be nested/hierarchical |
+| `bclust` | Bagged clustering (more robust/stable version of hclust) | Same as hclust, when you want more stability across resampling |
+| `dpih` | Uses histogram bin-width optimization (plug-in bandwidth) | Statistically-driven bin width, less common for choropleths |
+| `headtails` | Splits repeatedly at the mean, tailored for heavy-tailed distributions | Highly skewed data with a long tail (e.g. wealth, city sizes) |
+
+#### Shiny App
+
+Let's build a shiny app to compare styles
+
+```{r}
+
+#| label: tmap-style-explorer
+#| standalone: true
+
+ui <- fluidPage(
+  titlePanel("tmap Classification Styles: Oahu Median Household Income"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      selectInput(
+        "style", "Classification style (style =)",
+        choices = c("pretty", "equal", "quantile", "jenks", "fisher",
+                    "sd", "kmeans", "hclust", "bclust", "dpih", "headtails"),
+        selected = "jenks"
+      ),
+      
+      sliderInput("n", "Number of classes (n)", min = 3, max = 9, value = 5, step = 1),
+      
+      selectInput(
+        "palette", "Palette",
+        choices = c("viridis", "magma", "plasma",
+                    "YlGnBu (Brewer)" = "YlGnBu",
+                    "YlOrRd (Brewer)" = "YlOrRd",
+                    "BuPu (Brewer)" = "BuPu"),
+        selected = "viridis"
+      ),
+      
+      checkboxInput("reverse", "Reverse palette", value = FALSE),
+      
+      hr(),
+      verbatimTextOutput("breaks_out")
+    ),
+    
+    mainPanel(
+      tmapOutput("map", height = "650px")
+    )
+  )
+)
+
+server <- function(input, output, session) {
+  
+  tmap_mode("view")
+  
+  pal <- reactive({
+    p <- input$palette
+    if (input$reverse) paste0("-", p) else p
+  })
+  
+  output$map <- renderTmap({
+    tm_shape(oahu_median_income) +
+      tm_polygons(
+        "estimate",
+        style   = input$style,
+        n       = input$n,
+        palette = pal(),
+        title   = "Median\nHousehold\nIncome",
+        id      = "GEOID"
+      )
+  })
+  
+  output$breaks_out <- renderPrint({
+    brks <- classInt::classIntervals(
+      oahu_median_income$estimate,
+      n = input$n,
+      style = input$style
+    )
+    cat("Breaks for style =", input$style, "\n\n")
+    print(round(brks$brks, 0))
+  })
+}
+
+shinyApp(ui, server)
+```
+
+#### Low Income
+
+Households under \$93000 are designated as low income. Let's map this
+
+```{r}
+oahu_median_income <- oahu_median_income |> 
+  mutate(low_income = ifelse(estimate < 93000, "yes", "no"))
+  
+```
+
+```{r}
+ggplot(data = oahu_median_income, aes(x = estimate)) +
+  geom_histogram(color = "black", fill = "steelblue") +
+  theme_bw() +
+  geom_vline(xintercept = 93000, color = "red")
+```
+
+```{r}
+mapview(oahu_median_income, zcol = "low_income", 
+        col.regions = c("forestgreen", "red")) 
+```
