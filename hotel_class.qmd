@@ -1,0 +1,111 @@
+---
+title: "Hotels in Class"
+format: html
+editor: visual
+---
+
+```{r}
+library(tidyverse)
+library(sf)
+library(here)
+library(mapview)
+library(ggplot2)
+library(RColorBrewer)
+library(classInt)
+library(shiny)
+library(leaflet)
+```
+
+### Read in Data
+
+```{r}
+hotels_data <- st_read(here("data/Hotels.geojson"))
+```
+
+### Questions
+
+From Kyle:
+
+- What island on average has the newest hotel infrastructure? Oldest?
+
+From Vlad
+
+- number of hotels by type, and another one isn't a question but making a histogram of hotels by year opened can bring a lot of different questions
+
+```{r}
+ggplot(data = hotels_data, aes(x = year_open)) +
+  geom_bar() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 5))
+```
+
+```{r}
+hotels_data_no_na_year <- hotels_data |> 
+  drop_na(year_open) |> 
+  filter(!year_open %in% c("N/A", "NA")) |> 
+  filter(!island %in% c("Molokai", "Lanai"))
+```
+
+```{r}
+ggplot(data = hotels_data_no_na_year, aes(x = year_open, fill = type)) +
+  geom_bar(color = "black") +
+  facet_wrap(~island, nrow = 4) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 5)) 
+```
+
+```{r}
+mapview(hotels_data, zcol = "type", label = "name", col.regions = brewer.pal(8, "Dark2"))
+```
+
+```{r}
+mapview(hotels_data, zcol = "units", label = "units")
+```
+
+```{r}
+ggplot(hotels_data, aes(x = units)) +
+  geom_histogram()
+```
+
+```{r}
+brks_jenks <- classIntervals(hotels_data$units, n = 4, style = "dpih")$brks
+```
+
+```{r}
+brks_jenks
+```
+
+```{r}
+mapview(hotels_data, zcol = "units", col.regions = viridis::viridis(6), at = brks_jenks)
+```
+
+```{r}
+ui <- fluidPage(
+  titlePanel("Vacation Stay Types"),
+  sidebarLayout(
+    sidebarPanel(
+      selectInput(
+        "var",
+        "Choose a stay type",
+        choices = unique(hotels_data$type)
+      )
+    ),
+    mainPanel(
+      leafletOutput("map", height = "700px")
+    )
+  )
+)
+
+server <- function(input, output, session) {
+  output$map <- renderLeaflet({
+    filtered_data <- hotels_data[hotels_data$type == input$var, ]
+    
+    mapview(
+      filtered_data,
+      zcol = "type",   # column name, fixed
+      layer.name = "type"
+    )@map
+  })
+}
+
+shinyApp(ui, server)
+```
