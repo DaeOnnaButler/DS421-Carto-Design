@@ -1,0 +1,246 @@
+---
+title: "🔥 Wildfire Cartography: Visualizing NASA FIRMS DataR"
+author: "DS 421 – Cartographic Design"
+date: "2025"
+format:
+  html:
+    toc: true
+    code-fold: true
+    theme: minty
+    css: styles.css
+    self-contained: false
+execute:
+  eval: false
+---
+
+------------------------------------------------------------------------
+
+Welcome to your hands-on lab using **NASA FIRMS wildfire detection data**. In this tutorial, you will:
+
+- Explore spatial file formats: shapefiles (.shp) and KMZ/KML
+- Visualize fire detections using `ggplot2`, `mapboxgl`, `leaflet`, and `gganimate`
+- Learn about satellite-based thermal sensing and what the data columns mean
+- Practice both static and interactive map design
+
+You’ll work with **real satellite data** capturing active fires detected across the continental U.S. and Hawaii by LANDSAT.
+
+------------------------------------------------------------------------
+
+## 📆 Load Required Libraries
+
+```{r}
+library(tidyverse)
+library(sf)            # Read and handle vector spatial data
+library(here)          # File paths
+library(dplyr)         # Data wrangling
+library(ggplot2)       # Static visualizations
+library(mapgl)      # Interactive mapping
+library(rnaturalearth) # Country/State boundaries
+library(gganimate)     # Animations over time
+library(leaflet)       # Lightweight web maps
+library(mapview)
+```
+
+------------------------------------------------------------------------
+
+## 📐 About the Data
+
+The data comes from [NASA FIRMS](https://firms.modaps.eosdis.nasa.gov/usfs/active_fire/#firms-shapefile), which provides **thermal anomaly** and **fire detection data** derived from satellite observations. Read the [FAQ](https://www.earthdata.nasa.gov/data/tools/firms/faq). Each point represents a heat signature flagged as a likely fire, with confidence scores:
+
+- `low`: Possibly noise or cloud
+- `medium`: Reasonable detection
+- `high`: Very likely a fire
+
+In this tutorial, we use the **7-day LANDSAT active fire shapefile** and its corresponding **KMZ fire footprint file**.
+
+------------------------------------------------------------------------
+
+## 📍 Read Point-Based Fire Detection Shapefile
+
+On this website: <https://firms.modaps.eosdis.nasa.gov/usfs/active_fire/#firms-shapefile:~:text=Real%2DTime%20data.-,Shapefiles,-Active%20fire%20detection> under Shapefiles, download the LANDSAT 30M USA (Conterminous) and Hawaii 7 day zip file
+
+- Click on the zip file you downloaded to unzip it
+
+- Create a data folder within DS421-Carto-Design
+
+- Move the unzipped file (will be a folder with 5 files within it) into the new data folder you created
+
+- Now you will be able to read the file in with the code below
+
+```{r}
+wildfire_shp_data <- st_read(here("data/LANDSAT_USA_contiguous_and_Hawaii_7d/LANDSAT_USA_contiguous_and_Hawaii_7d.shp"))
+```
+
+This dataset contains point geometries where fires were detected. Important columns include:
+
+- `ACQ_DATE`: Date of detection
+- `LATITUDE`, `LONGITUDE`: Coordinates
+- `CONFIDENCE`: Detection confidence category (low, medium, high)
+
+------------------------------------------------------------------------
+
+## 📈 Challenge 1
+
+Use ggplot to create a line plot of fires with the day on the x axis and number of fires on the y axis. Hint: First, create a new dataframe called wildfire_counts that uses `group_by()` and `summarise()` to count the number of fires
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+------------------------------------------------------------------------
+
+## 📈 Challenge 2
+
+Use ggplot to create a stacked bar chart colored by confidence with number of fires on the y axis for each day
+
+```{r}
+
+```
+
+## 📏 Map Fire Points by Confidence Level
+
+## 📈 Challenge 3
+
+use the `mapview` package to map fire points with the points colored by confidence level
+
+```{r}
+
+```
+
+------------------------------------------------------------------------
+
+## 🔥 Create a Heatmap of Fire Activity
+
+This code comes from [this blog post](https://walker-data.com/posts/mapgl-dots/#customizing-heatmap-options:~:text=opacity%2C%20and%20radius.-,Customizing%20heatmap%20options,-Below%2C%20we%E2%80%99ll%20decrease)
+
+```{r}
+mapboxgl(
+  style = mapbox_style("dark"),
+  center = c(mean(wildfire_shp_data$LONGITUDE), mean(wildfire_shp_data$LATITUDE)),
+  zoom = 2
+) |>
+  add_heatmap_layer(
+    id = "fire_heatmap",
+    source = wildfire_shp_data,
+    heatmap_radius = 2,
+    heatmap_intensity = mapgl::interpolate(
+      property = "zoom",
+      values = c(0, 9),
+      stops = c(1, 3)
+    ),
+    heatmap_color = mapgl::interpolate(
+      property = "heatmap-density",
+      values = seq(0, 1, 0.2),
+      stops = c("transparent", viridisLite::viridis(5, option = "inferno"))
+    ),
+    heatmap_opacity = 0.8
+  )
+```
+
+## 📈 Challenge 4
+
+Filter the data to only high confidence fires and create a new heatmap
+
+```{r}
+
+```
+
+------------------------------------------------------------------------
+
+## 🎙️ Animate Fire Detection Over Time
+
+```{r}
+usa <- ne_states(country = "united states of america", returnclass = "sf")
+
+# Plot animated wildfire data
+p <- ggplot() +
+  geom_sf(data = usa, fill = "grey95", color = "white") +
+  geom_point(
+    data = wildfire_shp_data,
+    aes(x = LONGITUDE, y = LATITUDE, color = CONFIDENCE, group = ACQ_DATE),
+    alpha = 0.8,
+    size = 1.2
+  ) +
+  scale_color_manual(
+    values = c("low" = "forestgreen", "medium" = "orange", "high" = "red")
+  ) +
+  coord_sf(xlim = c(-125, -66), ylim = c(24, 50)) +
+  theme_minimal() +
+  labs(
+    title = "🔥 Wildfire Detections Across the U.S.",
+    subtitle = "Date: {frame_time}",
+    color = "Confidence",
+    caption = "Source: LANDSAT Fire Detections"
+  ) +
+  transition_time(as.Date(wildfire_shp_data$ACQ_DATE)) +
+  ease_aes('linear') 
+
+gganimate::animate(
+  p,
+  nframes = 30,
+  fps = 5,
+  width = 800,
+  height = 600,
+  renderer = gifski_renderer(loop = TRUE)
+)
+
+```
+
+------------------------------------------------------------------------
+
+## 🛡️ Load and Visualize KML Fire Area Polygons
+
+- Download the FirespotArea_LANDSAT_USA_contiguous_and_Hawaii_7d.kmz from here: <https://firms.modaps.eosdis.nasa.gov/usfs/active_fire/#firms-shapefile:~:text=Fire%20detection%20location-,Active%20fire%20detection%20footprint%20and%20centroid%20KMLs/KMZs,-Download%20MODIS%2C%20VIIRS> under **Active fire detection footprint and centroid KMLs/KMZs download the LANDSAT 30m** USA (Conterminous) and Hawaii 7d
+
+- Move the .kmz file into your data folder
+
+- The code below will unzip it, move it into a fire_kml file directory that contains a kml file that is readable in R
+
+```{r}
+unzip("data/FirespotArea_LANDSAT_USA_contiguous_and_Hawaii_7d.kmz", exdir = "data/fire_kml")
+```
+
+```{r}
+
+wildfire_area_data <- st_read(
+  "data/fire_kml/LANDSAT_USA_contiguous_and_Hawaii_7d_1784054537573.kml",
+  layer = "30m Fire Detection Footprints (older than the last 24hrs) "
+)
+
+wildfire_area_data <- wildfire_area_data |>
+  st_zm(drop = TRUE, what = "ZM") |>  # Remove Z/M dimension if present
+  st_make_valid() |>                  # Ensure geometry is valid
+  st_transform(4326)                  # Project to WGS84 for mapping
+
+leaflet(wildfire_area_data) |>
+  addProviderTiles("CartoDB.DarkMatter") |>
+  addPolygons(color = "red", weight = 0.8, opacity = 0.8)
+```
+
+------------------------------------------------------------------------
+
+## 📈 Challenge 5
+
+Download the LANDSAT 30m CSV for USA (Conterminous) and Hawaii at the bottom right of this page: <https://firms.modaps.eosdis.nasa.gov/usfs/active_fire/#firms-shapefile>
+
+- Move it into the data folder
+
+- Read the csv into R as a dataframe
+
+- Transform the dataframe into an sf object using the function [st_as_sf()](https://r-spatial.github.io/sf/reference/st_as_sf.html) so it can be mapped. As another argument within the same [st_as_sf(](https://r-spatial.github.io/sf/reference/st_as_sf.html)) function assign a coordinate reference system.
+
+- Map the data with any package you would like, just make sure there is at least a slight difference from the examples above, be as creative as possible while utilizing your critical thinking
+
+```{r}
+
+```
+
+## ✨ Summary
+
+- You worked with **shapefiles**, CSV and **KML** for geospatial fire data
+- You mapped **points**, **heatmaps**, and **animated detections**
+- You explored how **satellite sensors** power near real-time cartography
