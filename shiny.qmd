@@ -29,12 +29,18 @@ library(ggpubr)
 library(plotly)
 library(mapview)
 library(leaflet)
+
+# Read the fire data
+fire_data <- read_csv("LANDSAT_USA_contiguous_and_Hawaii_7d.csv")
+
+# Check if it loaded
+head(fire_data)
 ```
 
 #### View Census Variables
 
 ```{r}
-acs_vars <- load_variables(year = 2023, dataset = "acs5", cache = TRUE)
+usa <- map_data("state")
 ```
 
 #### Transform Data
@@ -86,11 +92,37 @@ hawaii_data <- hawaii_data_raw |>
 Can you make a histogram of median rent colored by county. Hint: You will have to make a new column called county based on the values in the NAME column
 
 ```{r}
+# Create county column from NAME
+hawaii_data <- hawaii_data |>
+  mutate(
+    county = case_when(
+      str_detect(NAME, "Hawaii County") ~ "Hawaii",
+      str_detect(NAME, "Honolulu County") ~ "Honolulu",
+      str_detect(NAME, "Kauai County") ~ "Kauai",
+      str_detect(NAME, "Maui County") ~ "Maui",
+      TRUE ~ "Other"
+    )
+  )
 
 ```
 
 ```{r}
-
+# Create the histogram
+ggplot(hawaii_data, aes(x = median_gross_rent, fill = county)) +
+  geom_histogram(bins = 20, alpha = 0.7, position = "identity") +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    title = "Distribution of Median Gross Rent by County",
+    x = "Median Gross Rent ($)",
+    y = "Count of Census Tracts",
+    fill = "County",
+    caption = "Source: ACS 2023 5-year estimates"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    legend.position = "bottom"
+  )
 ```
 
 ## 🧩 Challenge 2
@@ -98,7 +130,25 @@ Can you make a histogram of median rent colored by county. Hint: You will have t
 A. Can you make a scatterplot showing the relationship between median income and median gross rent. Can you use the `stat_cor()`function to show a correlation coefficient and p value
 
 ```{r}
-
+ggplot(hawaii_data, aes(x = median_income, y = median_gross_rent)) +
+  geom_point(alpha = 0.6, color = "darkblue", size = 2.5) +
+  geom_smooth(method = "lm", se = TRUE, color = "red") +
+  stat_cor(
+    method = "pearson",
+    label.x = 50000,
+    label.y = 2500,
+    size = 5
+  ) +
+  labs(
+    title = "Relationship between Median Income and Median Gross Rent",
+    x = "Median Household Income ($)",
+    y = "Median Gross Rent ($)",
+    caption = "Source: ACS 2023 5-year estimates"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
 ```
 
 ```{r}
@@ -109,6 +159,30 @@ B. Can you make this scatterplot interactive with `ggplotly()`
 
 ```{r}
 
+
+p <- ggplot(hawaii_data, aes(
+  x = median_income,
+  y = median_gross_rent,
+  text = paste(
+    "County:", county, "<br>",
+    "Income: $", format(median_income, big.mark = ","), "<br>",
+    "Rent: $", format(median_gross_rent, big.mark = ",")
+  )
+)) +
+  geom_point(alpha = 0.6, color = "darkblue", size = 2.5) +
+  geom_smooth(method = "lm", se = TRUE, color = "red") +
+  stat_cor(method = "pearson") +
+  labs(
+    title = "Relationship between Median Income and Median Gross Rent",
+    x = "Median Household Income ($)",
+    y = "Median Gross Rent ($)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+
+ggplotly(p, tooltip = "text")
 ```
 
 ## 🧩 Challenge 3
@@ -116,7 +190,15 @@ B. Can you make this scatterplot interactive with `ggplotly()`
 Can you make a choropleth map of Hawaii using `mapview()` that shows median rent by census tract
 
 ```{r}
-
+mapview(
+  hawaii_data,
+  zcol = "median_gross_rent",
+  layer.name = "Median Gross Rent",
+  col.regions = viridisLite::viridis(10),
+  alpha.regions = 0.7,
+  legend = TRUE,
+  map.types = "CartoDB.Positron"
+)
 ```
 
 #### Building a Shiny App
@@ -126,6 +208,14 @@ We have these 3 variables in hawaii_data, it would be nice if users can select a
 There are many mapping packages we can use with Shiny. The simplest for now is `mapview`. It is good to note that the mapgl package is also designed specifically to [work with advanced shiny apps](https://walker-data.com/mapgl/articles/shiny.html).
 
 ```{r}
+
+# Define choices
+variable_choices <- c(
+  "Total Population" = "total_pop",
+  "Median Income" = "median_income",
+  "Housing Units" = "housing_units",
+  "Land Area" = "land_area"
+)
 
 ui <- fluidPage(
   titlePanel("Hawaii Census Map"),
@@ -141,11 +231,30 @@ ui <- fluidPage(
 
 server <- function(input, output, session) {
   output$map <- renderLeaflet({
-    mapview(
-      hawaii_data,
-      zcol = input$var,
-      layer.name = names(oahu_choices)[oahu_choices == input$var]
-    )@map
+    # Get the selected variable
+    selected_var <- hawaii_data[[input$var]]
+    
+    # Create color palette
+    pal <- colorNumeric("viridis", selected_var)
+    
+    leaflet(hawaii_data) |>
+      addProviderTiles("CartoDB.Positron") |>
+      addPolygons(
+        fillColor = ~pal(selected_var),
+        weight = 1,
+        opacity = 1,
+        color = "white",
+        fillOpacity = 0.7,
+        label = ~paste(names(variable_choices)[which(variable_choices == input$var)], ":", 
+                       format(selected_var, big.mark = ",")),
+        labelOptions = labelOptions(direction = "auto")
+      ) |>
+      addLegend(
+        pal = pal,
+        values = selected_var,
+        title = names(variable_choices)[which(variable_choices == input$var)],
+        position = "bottomright"
+      )
   })
 }
 
@@ -158,6 +267,126 @@ Can you create a shiny app using your LANDSAT_USA_contiguous_and_Hawaii_7d.csv i
 
 ```{r}
 
+ui_fire <- fluidPage(
+  titlePanel("🔥 Wildfire Confidence Explorer"),
+  sidebarLayout(
+    sidebarPanel(
+      selectInput(
+        "confidence_filter",
+        "Filter by Confidence Level:",
+        choices = c("All", "high", "medium", "low"),
+        selected = "All"
+      ),
+      
+      # Bonus: Date range slider
+      sliderInput(
+        "date_range",
+        "Select Date Range:",
+        min = as.Date(min(fire_data$acq_date)),
+        max = as.Date(max(fire_data$acq_date)),
+        value = c(as.Date(min(fire_data$acq_date)), as.Date(max(fire_data$acq_date))),
+        timeFormat = "%Y-%m-%d"
+      ),
+      
+      # Bonus: Heatmap toggle
+      checkboxInput(
+        "show_heatmap",
+        "Show Heatmap",
+        value = FALSE
+      ),
+      
+      hr(),
+      p("Data source: NASA FIRMS LANDSAT")
+    ),
+    mainPanel(
+      leafletOutput("fire_map", height = "700px")
+    )
+  )
+)
+
+server_fire <- function(input, output, session) {
+  
+  filtered_data <- reactive({
+    df <- fire_sf
+    
+    if (input$confidence_filter != "All") {
+      df <- df |> filter(confidence == input$confidence_filter)
+    }
+    
+    df <- df |>
+      filter(
+        as.Date(acq_date) >= input$date_range[1],
+        as.Date(acq_date) <= input$date_range[2]
+      )
+    
+    df
+  })
+  
+  output$fire_map <- renderLeaflet({
+    df <- filtered_data()
+    
+    if (nrow(df) == 0) {
+      return(
+        leaflet() |>
+          addProviderTiles("CartoDB.DarkMatter") |>
+          setView(lng = -98, lat = 39, zoom = 4) |>
+          addControl("No fires match the selected criteria", position = "topcenter")
+      )
+    }
+     map <- leaflet(df) |>
+      addProviderTiles("CartoDB.DarkMatter") |>
+      setView(lng = -98, lat = 39, zoom = 4)
+    
+    if (input$show_heatmap) {
+      map |> 
+        addHeatmap(
+          lng = ~st_coordinates(geometry)[,1],
+          lat = ~st_coordinates(geometry)[,2],
+          blur = 20,
+          max = 0.05,
+          radius = 15
+        )
+    } else {
+      map |>
+        addCircleMarkers(
+          color = ~case_when(
+            confidence == "high" ~ "#FF0000",
+            confidence == "medium" ~ "#FFA500",
+            confidence == "low" ~ "#008000"
+          ),
+          radius = 3,
+          fillOpacity = 0.7,
+          opacity = 0.8,
+          popup = ~paste(
+            "<b>Fire Detection</b><br>",
+            "Date:", acq_date, "<br>",
+            "Time:", acq_time, "<br>",
+            "Satellite:", satellite, "<br>",
+            "Confidence:", confidence
+          ),
+          label = ~paste("Fire -", confidence),
+          labelOptions = labelOptions(
+            style = list("font-weight" = "normal", padding = "3px 8px"),
+            textsize = "12px",
+            direction = "auto"
+          )
+        ) |>
+        addControl(
+          html = "<div style='background-color:white;padding:8px 12px;border-radius:5px;box-shadow:0 0 10px rgba(0,0,0,0.3);'>
+                  <b>🔥 Fire Confidence</b><br>
+                  <span style='color:#FF0000;'>●</span> High<br>
+                  <span style='color:#FFA500;'>●</span> Medium<br>
+                  <span style='color:#008000;'>●</span> Low
+                  </div>",
+          position = "bottomright"
+        )
+    }
+  })
+}
+
+# Uncomment to run the app
+# shinyApp(ui_fire, server_fire)
+   
 ```
 
 ```{r}
@@ -171,5 +400,114 @@ Can you add the functionality to your census shiny app (new panel) that allows u
 We should remain careful about our use/potential dependence on AI for coding but for cases like these where we have built all the individual parts, AI can be really helpful in putting them together in a sleek design on a shiny app.
 
 ```{r}
+# Challenge 5: Enhanced Census App with Scatter Plot
 
+ui_census_enhanced <- fluidPage(
+  titlePanel("🌺 Hawaii Census Explorer"),
+  
+  tabsetPanel(
+    # Map Tab
+    tabPanel(
+      "🗺️ Map",
+      sidebarLayout(
+        sidebarPanel(
+          selectInput(
+            "var_map",
+            "Choose a variable to map:",
+            choices = variable_choices
+          )
+        ),
+        mainPanel(
+          leafletOutput("census_map", height = "700px")
+        )
+      )
+    ),
+    
+    # Scatter Plot Tab
+    tabPanel(
+      "📊 Scatter Plot",
+      sidebarLayout(
+        sidebarPanel(
+          selectInput(
+            "var_x",
+            "Choose X-axis variable:",
+            choices = c(
+              "Median Income" = "median_income",
+              "Median Gross Rent" = "median_gross_rent",
+              "Percent Bachelor's" = "pct_bachelors"
+            ),
+            selected = "median_income"
+          ),
+          selectInput(
+            "var_y",
+            "Choose Y-axis variable:",
+            choices = c(
+              "Median Gross Rent" = "median_gross_rent",
+              "Median Income" = "median_income",
+              "Percent Bachelor's" = "pct_bachelors"
+            ),
+            selected = "median_gross_rent"
+          )
+        ),
+        mainPanel(
+          plotlyOutput("scatter_plot", height = "600px")
+        )
+      )
+    )
+  )
+)
+
+server_census_enhanced <- function(input, output, session) {
+  
+  output$census_map <- renderLeaflet({
+    mapview(
+      hawaii_data,
+      zcol = input$var_map,
+      layer.name = names(variable_choices)[variable_choices == input$var_map],
+      col.regions = viridisLite::viridis(10),
+      alpha.regions = 0.7
+    )@map
+  })
+  
+  output$scatter_plot <- renderPlotly({
+    df <- hawaii_data |> st_drop_geometry()
+    
+    p <- ggplot(df, aes(x = .data[[input$var_x]], 
+                        y = .data[[input$var_y]],
+                        text = paste(
+                          "County:", county, "<br>",
+                          names(variable_choices)[variable_choices == input$var_x], ": $", 
+                          format(.data[[input$var_x]], big.mark = ","), "<br>",
+                          names(variable_choices)[variable_choices == input$var_y], ": $", 
+                          format(.data[[input$var_y]], big.mark = ",")
+                        ))) +
+      geom_point(alpha = 0.6, color = "darkblue", size = 2) +
+      geom_smooth(method = "lm", se = TRUE, color = "red", alpha = 0.2) +
+      stat_cor(
+        method = "pearson",
+        label.x = min(df[[input$var_x]], na.rm = TRUE),
+        label.y = max(df[[input$var_y]], na.rm = TRUE),
+        size = 4
+      ) +
+      labs(
+        title = paste(
+          "Relationship between",
+          names(variable_choices)[variable_choices == input$var_x],
+          "and",
+          names(variable_choices)[variable_choices == input$var_y]
+        ),
+        x = names(variable_choices)[variable_choices == input$var_x],
+        y = names(variable_choices)[variable_choices == input$var_y]
+      ) +
+      theme_minimal() +
+      theme(
+        plot.title = element_text(hjust = 0.5, face = "bold")
+      )
+    
+    ggplotly(p, tooltip = "text")
+  })
+}
+
+# Uncomment to run the app
+# shinyApp(ui_census_enhanced, server_census_enhanced)
 ```
