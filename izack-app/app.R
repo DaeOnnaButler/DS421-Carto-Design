@@ -1,12 +1,6 @@
 # DS421: Cartographic Design – Final Project
 # Global Shark Attack Incidents by Country
 
-# install.packages() calls in app.R, they'll slow down / break deployment
-# install.packages("remotes")
-# remotes::install_github("benyamindsmith/RKaggle")
-# install.packages("countrycode")
-# install.packages("rnaturalearth")
-
 library(RKaggle)
 library(tidyverse)
 library(lubridate)
